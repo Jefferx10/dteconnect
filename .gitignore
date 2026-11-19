@@ -1,0 +1,9 @@
+node_modules/
+lib/
+.env
+*.pfx
+*.p12
+*.key
+*.jks
+caf/
+datos/
