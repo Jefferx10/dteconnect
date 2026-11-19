@@ -1,12 +1,14 @@
 {
-  "name": "dteconnect",
+  "name": "patiolo-dte",
   "version": "0.1.0",
   "private": true,
-  "description": "DTEConnect — emite documentos tributarios electrónicos contra el SII y expone una API propia",
+  "description": "Servicio de facturación electrónica: emite DTE contra el SII y expone una API propia",
   "main": "lib/index.js",
-  "engines": { "node": ">=22" },
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && node -e \"const f=require('fs');f.mkdirSync('lib/almacen',{recursive:true});f.copyFileSync('src/almacen/esquema.sql','lib/almacen/esquema.sql')\"",
     "dev": "tsc --watch",
     "start": "node lib/index.js",
     "prueba": "node --test lib/pruebas/"
