@@ -1,4 +1,5 @@
-import { ruta, archivoDe, malaPeticion, noEncontrado, ErrorHttp } from "./http";
+import { ruta, archivoDe, malaPeticion, noEncontrado, prohibido, ErrorHttp } from "./http";
+import { appPuedeCon } from "../almacen/apps";
 import {
   listarEmisores, verEmisor, guardarEmisor, guardarCertificado, cargarCaf, activarEmisor,
 } from "../almacen/emisores";
@@ -6,6 +7,7 @@ import { listarApps, crearApp, renovarLlave, activarApp } from "../almacen/apps"
 import { foliosDisponibles } from "../almacen/folios";
 import { consulta } from "../almacen/db";
 import { ErrorDatos, NoExiste, SinFolios } from "../almacen/errores";
+import { emitir, verDocumento, xmlDocumento, listarDocumentos, actualizarEstado } from "../emision";
 
 /*
  * Las rutas.
@@ -98,3 +100,48 @@ ruta("GET", "/bitacora", "admin", async ({ consulta: q }) => {
     ),
   };
 });
+
+// ------------------------------------------------------------ documentos
+
+ruta("POST", "/documentos", "app", async ({ app, cuerpo }) => comoHttp(async () => {
+  if (!cuerpo.emisor) throw malaPeticion("Falta el emisor.");
+  if (app && !appPuedeCon(app, cuerpo.emisor)) {
+    throw prohibido(`La aplicación ${app.nombre} no tiene permitido operar con ese emisor.`);
+  }
+  return emitir(app!.nombre, cuerpo);
+}));
+
+ruta("GET", "/documentos", "app", async ({ consulta: q }) => ({
+  documentos: await listarDocumentos({
+    emisor: q.get("emisor") || undefined,
+    estado: q.get("estado") || undefined,
+    desde: q.get("desde") || undefined,
+    limite: Number(q.get("limite") || 100),
+  }),
+}));
+
+ruta("GET", "/documentos/:id", "app", async ({ params }) => {
+  const d = await verDocumento(params.id);
+  if (!d) throw noEncontrado(`No hay un documento con id ${params.id}.`);
+  return d;
+});
+
+/** El XML firmado, que es lo que se le entrega al receptor. */
+ruta("GET", "/documentos/:id/xml", "app", async ({ params, res }) => {
+  const xml = await xmlDocumento(params.id);
+  if (!xml) throw noEncontrado("Ese documento todavía no tiene XML.");
+  const cuerpo = Buffer.from(xml, "utf8");
+  res.writeHead(200, {
+    "Content-Type": "application/xml; charset=utf-8",
+    "Content-Length": cuerpo.length,
+    "Content-Disposition": `attachment; filename="dte-${params.id}.xml"`,
+  });
+  res.end(cuerpo);
+});
+
+/** Preguntarle al SII ahora mismo, sin esperar al trabajo de seguimiento. */
+ruta("POST", "/documentos/:id/estado", "app", async ({ params }) => comoHttp(async () => {
+  const d = await actualizarEstado(params.id);
+  if (!d) throw noEncontrado(`No hay un documento con id ${params.id}.`);
+  return d;
+}));

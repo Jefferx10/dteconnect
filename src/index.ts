@@ -2,6 +2,7 @@ import { createServer } from "node:http";
 import { atender } from "./api/http";
 import { esperarBase, migrar, cerrar } from "./almacen/db";
 import { llaveMaestra } from "./almacen/cifrado";
+import { arrancarSeguimiento, detenerSeguimiento } from "./trabajos/seguimiento";
 import "./api/rutas";
 
 /*
@@ -27,10 +28,12 @@ async function arrancar(): Promise<void> {
   servidor.requestTimeout = 120000;
 
   servidor.listen(puerto, () => console.log(`DTEConnect escuchando en el puerto ${puerto}`));
+  arrancarSeguimiento();
 
   // Que un despliegue no corte una emisión a medio camino.
   const apagar = async (senal: string) => {
     console.log(`[${senal}] cerrando…`);
+    detenerSeguimiento();
     servidor.close();
     await cerrar().catch(() => { /* ya estaba cerrada */ });
     process.exit(0);
