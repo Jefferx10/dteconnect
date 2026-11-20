@@ -7,7 +7,8 @@ import { listarApps, crearApp, renovarLlave, activarApp } from "../almacen/apps"
 import { foliosDisponibles } from "../almacen/folios";
 import { consulta } from "../almacen/db";
 import { ErrorDatos, NoExiste, SinFolios } from "../almacen/errores";
-import { emitir, verDocumento, xmlDocumento, listarDocumentos, actualizarEstado } from "../emision";
+import { emitir, verDocumento, xmlDocumento, listarDocumentos, actualizarEstado, datosImpresion, documentoPorFolio } from "../emision";
+import { pdfDocumento } from "../pdf/impresa";
 
 /*
  * Las rutas.
@@ -145,3 +146,25 @@ ruta("POST", "/documentos/:id/estado", "app", async ({ params }) => comoHttp(asy
   if (!d) throw noEncontrado(`No hay un documento con id ${params.id}.`);
   return d;
 }));
+
+/** La representación impresa, con el timbre PDF417. */
+ruta("GET", "/documentos/:id/pdf", "app", async ({ params, res }) => comoHttp(async () => {
+  const pdf = await pdfDocumento(await datosImpresion(params.id));
+  res.writeHead(200, {
+    "Content-Type": "application/pdf",
+    "Content-Length": pdf.length,
+    "Content-Disposition": `inline; filename="dte-${params.id}.pdf"`,
+  });
+  res.end(pdf);
+}));
+
+/**
+ * El mismo documento, buscado como lo conoce quien lo emitió: por emisor, tipo y
+ * folio. Sirve para preguntar "¿fue aceptada mi boleta 1234?" sin haber guardado
+ * el identificador que devolvió este servicio.
+ */
+ruta("GET", "/documentos/:rut/:tipo/:folio", "app", async ({ params }) => {
+  const d = await documentoPorFolio(params.rut, Number(params.tipo), Number(params.folio));
+  if (!d) throw noEncontrado(`No hay un documento tipo ${params.tipo} folio ${params.folio} para ${params.rut}.`);
+  return d;
+});

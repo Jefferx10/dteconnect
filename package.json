@@ -14,13 +14,16 @@
     "prueba": "node --test lib/pruebas/"
   },
   "dependencies": {
+    "bwip-js": "^4.11.4",
     "node-forge": "^1.3.1",
+    "pdfkit": "^0.21.0",
     "pg": "^8.13.1",
     "xml-crypto": "^6.1.2"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
     "@types/node-forge": "^1.3.11",
+    "@types/pdfkit": "^0.13.9",
     "@types/pg": "^8.11.10",
     "typescript": "^5.6.0"
   }

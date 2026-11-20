@@ -252,3 +252,69 @@ export async function actualizarEstado(id: string, trans: Transporte = REAL): Pr
   }
   return verDocumento(id);
 }
+
+/*
+ * Los datos para la representación impresa salen del **documento firmado**, no de
+ * la petición que lo originó: lo que se imprime tiene que ser exactamente lo que
+ * se timbró y se envió, no lo que alguien quiso enviar.
+ */
+
+const entre = (xml: string, t: string): string =>
+  xml.match(new RegExp(`<${t}>([\\s\\S]*?)</${t}>`))?.[1] ?? "";
+const desescapar = (s: string): string =>
+  s.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&amp;/g, "&");
+
+export async function datosImpresion(id: string) {
+  const r = await consulta<any>(
+    `select d.*, e.razon, e.giro, e.direccion, e.comuna, e.ciudad,
+            e.resolucion_fecha, e.resolucion_numero
+       from documentos d join emisores e on e.rut = d.emisor_rut
+      where d.id = $1`, [id],
+  );
+  if (!r.length) throw new NoExiste(`No hay un documento con id ${id}.`);
+  const d = r[0];
+  if (!d.xml) throw new ErrorDatos("Ese documento todavía no está firmado.");
+  const xml = (d.xml as Buffer).toString("utf8");
+
+  const ted = xml.match(/<TED[\s\S]*?<\/TED>/)?.[0];
+  if (!ted) throw new ErrorDatos("El documento guardado no trae su timbre.");
+
+  const lineas = [...xml.matchAll(/<Detalle>([\s\S]*?)<\/Detalle>/g)].map((m) => {
+    const b = m[1];
+    return {
+      nombre: desescapar(entre(b, "NmbItem")),
+      cantidad: Number(entre(b, "QtyItem") || 1),
+      precio: Number(entre(b, "PrcItem") || 0),
+      descuento: Number(entre(b, "DescuentoMonto") || 0),
+      monto: Number(entre(b, "MontoItem") || 0),
+    };
+  });
+
+  return {
+    tipo: d.tipo, folio: d.folio, fecha: fecha(d.fecha),
+    emisor: {
+      rut: d.emisor_rut, razon: d.razon, giro: d.giro,
+      direccion: d.direccion, comuna: d.comuna, ciudad: d.ciudad,
+    },
+    receptor: {
+      rut: d.receptor_rut, razon: d.receptor_razon,
+      giro: desescapar(entre(xml, "GiroRecep")) || undefined,
+      direccion: desescapar(entre(xml, "DirRecep")) || undefined,
+      comuna: desescapar(entre(xml, "CmnaRecep")) || undefined,
+    },
+    lineas,
+    neto: d.neto, exento: d.exento, iva: d.iva, total: d.total,
+    ted,
+    resolucion: { fecha: fecha(d.resolucion_fecha), numero: d.resolucion_numero },
+    ambiente: d.ambiente as Ambiente,
+  };
+}
+
+/** Busca un documento por emisor, tipo y folio, que es como lo conoce quien lo pidió. */
+export async function documentoPorFolio(emisor: string, tipo: number, folio: number): Promise<Documento | null> {
+  const r = await consulta(
+    `select ${CAMPOS} from documentos where emisor_rut = $1 and tipo = $2 and folio = $3`,
+    [rutPlano(emisor), tipo, folio],
+  );
+  return r.length ? aDocumento(r[0]) : null;
+}
