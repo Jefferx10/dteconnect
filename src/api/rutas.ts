@@ -9,7 +9,6 @@ import { consulta } from "../almacen/db";
 import { ErrorDatos, NoExiste, SinFolios } from "../almacen/errores";
 import { emitir, verDocumento, xmlDocumento, listarDocumentos, actualizarEstado, datosImpresion, documentoPorFolio } from "../emision";
 import { pdfDocumento, Formato } from "../pdf/impresa";
-import { pdfTermico } from "../pdf/termica";
 
 /*
  * Las rutas.
@@ -152,12 +151,12 @@ ruta("POST", "/documentos/:id/estado", "app", async ({ params }) => comoHttp(asy
  * La representación impresa, con el timbre PDF417.
  *
  * Dos formatos, no uno encogido: `carta` para la hoja que se entrega o se archiva,
- * y `termica` para el rollo de 80 mm del punto de venta. Se elige con ?formato=.
+ * y `termica80` para el rollo de 80 mm del punto de venta. Se elige con ?formato=.
  */
 ruta("GET", "/documentos/:id/pdf", "app", async ({ params, consulta: q, res }) => comoHttp(async () => {
-  const formato = q.get("formato") === "termica" ? "termica" : "carta";
+  const formato: Formato = q.get("formato") === "termica80" ? "termica80" : "carta";
   const datos = await datosImpresion(params.id);
-  const pdf = formato === "termica" ? await pdfTermico(datos) : await pdfDocumento(datos);
+  const pdf = await pdfDocumento(datos, formato);
   res.writeHead(200, {
     "Content-Type": "application/pdf",
     "Content-Length": pdf.length,
