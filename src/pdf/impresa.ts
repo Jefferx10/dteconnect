@@ -55,25 +55,41 @@ const dia = (f: string): string => { const [a, m, d] = f.split("-"); return `${d
  * demasiado aplastado se lee mal, y el del SII hay que poder escanearlo del papel.
  * Compruébalo escaneando de verdad antes de las muestras de impresión.
  */
-export async function timbrePdf417(ted: string): Promise<Buffer> {
+export type Formato = "carta" | "termica80";
+
+/**
+ * El timbre como PDF417.
+ *
+ * En hoja carta van 18 columnas. En el rollo de 80 mm van 10, y no por gusto: con
+ * 18 columnas el módulo quedaría en 0,18 mm y un cabezal térmico de 203 dpi no
+ * resuelve eso — el código se imprime pero no se deja escanear.
+ */
+export async function timbrePdf417(ted: string, formato: Formato = "carta"): Promise<Buffer> {
   // `columns` y `eclevel` son de PDF417 y no están en el tipo genérico de la
   // librería, aunque sí en su API. El cast es por los tipos, no por el comportamiento.
   const opciones = {
     bcid: "pdf417",
     text: ted,
-    columns: 18,
+    columns: formato === "termica80" ? 10 : 18,
     eclevel: 5,
     scaleX: 2,
-    scaleY: 3,
+    // En el rollo la fila va al doble del módulo y no al triple: con 10 columnas el
+    // código ya sale alto, y cada milímetro de más es papel botado en cada ticket.
+    scaleY: formato === "termica80" ? 2 : 3,
     paddingwidth: 0,
     paddingheight: 0,
   } as unknown as Parameters<typeof toBuffer>[0];
   return (await toBuffer(opciones)) as unknown as Buffer;
 }
 
-/** Arma el PDF y lo devuelve entero. */
-export async function pdfDocumento(d: DatosImpresion): Promise<Buffer> {
-  const timbre = await timbrePdf417(d.ted);
+/** Arma el PDF en el formato que se pida. */
+export async function pdfDocumento(d: DatosImpresion, formato: Formato = "carta"): Promise<Buffer> {
+  return formato === "termica80" ? pdfTermica(d) : pdfCarta(d);
+}
+
+/** Hoja carta: lo que se entrega impreso o por correo. */
+async function pdfCarta(d: DatosImpresion): Promise<Buffer> {
+  const timbre = await timbrePdf417(d.ted, "carta");
   const doc = new PDFDocument({ size: "LETTER", margin: 40, info: { Title: `${NOMBRE_DOC[d.tipo] || "DTE"} ${d.folio}` } });
 
   const trozos: Buffer[] = [];
@@ -167,4 +183,136 @@ export async function pdfDocumento(d: DatosImpresion): Promise<Buffer> {
 
   doc.end();
   return listo;
+}
+
+/*
+ * Rollo térmico de 80 mm.
+ *
+ * El papel mide 80 mm pero el área que imprime son unos 72: los dos márgenes no
+ * son decorativos, son el borde que el cabezal no alcanza.
+ *
+ * La altura se calcula antes de crear la página porque un PDF necesita saber el
+ * tamaño de antemano, y en un rollo continuo no hay "página siguiente": si el
+ * cálculo se queda corto, el documento sale cortado.
+ */
+
+/** Ancho y alto de un PNG, leídos de su cabecera IHDR. */
+function dimensionPng(png: Buffer): { ancho: number; alto: number } {
+  return { ancho: png.readUInt32BE(16), alto: png.readUInt32BE(20) };
+}
+
+const ANCHO_80 = 226.77;  // 80 mm en puntos
+const MARGEN_80 = 10;
+
+async function pdfTermica(d: DatosImpresion): Promise<Buffer> {
+  const timbre = await timbrePdf417(d.ted, "termica80");
+  const util = ANCHO_80 - MARGEN_80 * 2;
+
+  // La proporción del timbre sale del PNG, no de una estimación.
+  const png = dimensionPng(timbre);
+  const altoTimbre = Math.round(util * (png.alto / png.ancho));
+
+  /*
+   * El alto hay que saberlo antes de crear la página, porque en un rollo continuo
+   * no hay "página siguiente". Calcularlo con constantes siempre sobra o falta, así
+   * que se dibuja dos veces: la primera sobre una página larga y desechable, solo
+   * para ver dónde termina el contenido, y la segunda del porte exacto.
+   *
+   * Cuesta unos milisegundos y ahorra centímetros de papel en cada ticket.
+   */
+  const medir = new PDFDocument({ size: [ANCHO_80, 2000], margin: MARGEN_80 });
+  medir.on("data", () => { /* se descarta */ });
+  const fin = dibujarTermica(medir, d, timbre, altoTimbre);
+  medir.end();
+
+  const doc = new PDFDocument({
+    size: [ANCHO_80, Math.ceil(fin + MARGEN_80)], margin: MARGEN_80,
+    info: { Title: `${NOMBRE_DOC[d.tipo] || "DTE"} ${d.folio}` },
+  });
+  const trozos: Buffer[] = [];
+  doc.on("data", (t: Buffer) => trozos.push(t));
+  const listo = new Promise<Buffer>((ok) => doc.on("end", () => ok(Buffer.concat(trozos))));
+  dibujarTermica(doc, d, timbre, altoTimbre);
+  doc.end();
+  return listo;
+}
+
+/** Dibuja el ticket y devuelve dónde terminó, para poder medirlo antes de imprimirlo. */
+function dibujarTermica(doc: PDFKit.PDFDocument, d: DatosImpresion, timbre: Buffer, altoTimbre: number): number {
+  const util = ANCHO_80 - MARGEN_80 * 2;
+  const centro = { width: util, align: "center" as const };
+  let y = MARGEN_80;
+  const salto = (n: number) => { y += n; };
+
+  // ---- Emisor ----
+  doc.font("Helvetica-Bold").fontSize(10).text(d.emisor.razon, MARGEN_80, y, centro);
+  y = doc.y;
+  doc.font("Helvetica").fontSize(7).fillColor("#333")
+    .text(d.emisor.giro, MARGEN_80, y, centro)
+    .text(`${d.emisor.direccion}, ${d.emisor.comuna}`, MARGEN_80, doc.y, centro);
+  y = doc.y + 6;
+
+  // ---- Recuadro del documento ----
+  doc.rect(MARGEN_80, y, util, 44).lineWidth(1).strokeColor("#000").stroke();
+  doc.fillColor("#000").font("Helvetica-Bold").fontSize(8)
+    .text(`R.U.T.: ${d.emisor.rut}`, MARGEN_80, y + 5, centro)
+    .fontSize(7.5).text(NOMBRE_DOC[d.tipo] || `DOCUMENTO ${d.tipo}`, MARGEN_80 + 2, y + 17, { width: util - 4, align: "center" })
+    .fontSize(10).text(`N° ${d.folio}`, MARGEN_80, y + 29, centro);
+  y += 50;
+
+  if (d.ambiente === "certificacion") {
+    doc.font("Helvetica-Bold").fontSize(7).text("DOCUMENTO DE PRUEBA", MARGEN_80, y, centro);
+    y = doc.y + 2;
+  }
+
+  doc.font("Helvetica").fontSize(7).text(dia(d.fecha), MARGEN_80, y, centro);
+  y = doc.y + 6;
+
+  // ---- Receptor: en la boleta al consumidor final no va ----
+  if (d.receptor.rut !== "66666666-6") {
+    doc.moveTo(MARGEN_80, y).lineTo(MARGEN_80 + util, y).lineWidth(0.5).strokeColor("#999").stroke();
+    salto(4);
+    doc.font("Helvetica-Bold").fontSize(7).text(d.receptor.razon, MARGEN_80, y, { width: util });
+    doc.font("Helvetica").text(`R.U.T.: ${d.receptor.rut}`, MARGEN_80, doc.y, { width: util });
+    if (d.receptor.giro) doc.text(d.receptor.giro, MARGEN_80, doc.y, { width: util });
+    if (d.receptor.direccion) doc.text(`${d.receptor.direccion}${d.receptor.comuna ? ", " + d.receptor.comuna : ""}`, MARGEN_80, doc.y, { width: util });
+    y = doc.y + 4;
+  }
+
+  // ---- Detalle ----
+  doc.moveTo(MARGEN_80, y).lineTo(MARGEN_80 + util, y).lineWidth(0.5).strokeColor("#000").stroke();
+  salto(4);
+  for (const l of d.lineas) {
+    doc.font("Helvetica").fontSize(7).fillColor("#000").text(l.nombre, MARGEN_80, y, { width: util });
+    y = doc.y;
+    doc.fontSize(7)
+      .text(`${l.cantidad} x ${pesos(l.precio)}`, MARGEN_80, y, { width: util / 2 })
+      .text(pesos(l.monto), MARGEN_80 + util / 2, y, { width: util / 2, align: "right" });
+    y = doc.y + 3;
+  }
+
+  // ---- Totales ----
+  doc.moveTo(MARGEN_80, y).lineTo(MARGEN_80 + util, y).lineWidth(0.5).strokeColor("#000").stroke();
+  salto(5);
+  const totalFila = (etiqueta: string, valor: number, fuerte = false) => {
+    doc.font(fuerte ? "Helvetica-Bold" : "Helvetica").fontSize(fuerte ? 9 : 7.5)
+      .text(etiqueta, MARGEN_80, y, { width: util / 2 })
+      .text(pesos(valor), MARGEN_80 + util / 2, y, { width: util / 2, align: "right" });
+    y = doc.y + 2;
+  };
+  if (d.exento) totalFila("EXENTO", d.exento);
+  if (d.neto) totalFila("NETO", d.neto);
+  if (d.iva) totalFila("IVA 19%", d.iva);
+  totalFila("TOTAL", d.total, true);
+
+  // ---- Timbre ----
+  y += 8;
+  doc.image(timbre, MARGEN_80, y, { fit: [util, altoTimbre], align: "center" });
+  y += altoTimbre + 4;
+  doc.font("Helvetica").fontSize(6).fillColor("#333")
+    .text("Timbre Electrónico SII", MARGEN_80, y, centro)
+    .text(`Res. N° ${d.resolucion.numero} de ${dia(d.resolucion.fecha)}`, MARGEN_80, doc.y, centro)
+    .text("Verifique documento: www.sii.cl", MARGEN_80, doc.y, centro);
+
+  return doc.y;
 }

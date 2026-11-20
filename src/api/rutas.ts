@@ -8,7 +8,8 @@ import { foliosDisponibles } from "../almacen/folios";
 import { consulta } from "../almacen/db";
 import { ErrorDatos, NoExiste, SinFolios } from "../almacen/errores";
 import { emitir, verDocumento, xmlDocumento, listarDocumentos, actualizarEstado, datosImpresion, documentoPorFolio } from "../emision";
-import { pdfDocumento } from "../pdf/impresa";
+import { pdfDocumento, Formato } from "../pdf/impresa";
+import { pdfTermico } from "../pdf/termica";
 
 /*
  * Las rutas.
@@ -147,13 +148,20 @@ ruta("POST", "/documentos/:id/estado", "app", async ({ params }) => comoHttp(asy
   return d;
 }));
 
-/** La representación impresa, con el timbre PDF417. */
-ruta("GET", "/documentos/:id/pdf", "app", async ({ params, res }) => comoHttp(async () => {
-  const pdf = await pdfDocumento(await datosImpresion(params.id));
+/**
+ * La representación impresa, con el timbre PDF417.
+ *
+ * Dos formatos, no uno encogido: `carta` para la hoja que se entrega o se archiva,
+ * y `termica` para el rollo de 80 mm del punto de venta. Se elige con ?formato=.
+ */
+ruta("GET", "/documentos/:id/pdf", "app", async ({ params, consulta: q, res }) => comoHttp(async () => {
+  const formato = q.get("formato") === "termica" ? "termica" : "carta";
+  const datos = await datosImpresion(params.id);
+  const pdf = formato === "termica" ? await pdfTermico(datos) : await pdfDocumento(datos);
   res.writeHead(200, {
     "Content-Type": "application/pdf",
     "Content-Length": pdf.length,
-    "Content-Disposition": `inline; filename="dte-${params.id}.pdf"`,
+    "Content-Disposition": `inline; filename="dte-${params.id}-${formato}.pdf"`,
   });
   res.end(pdf);
 }));
