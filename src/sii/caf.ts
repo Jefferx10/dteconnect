@@ -33,6 +33,17 @@ function campo(xml: string, etiqueta: string): string {
   return m ? m[1].trim() : "";
 }
 
+/** ¿Es un RUT chileno de verdad? Comprueba el dígito verificador, módulo 11. */
+export function rutValido(r: string): boolean {
+  const s = String(r).replace(/[.\s-]/g, "").toUpperCase();
+  if (!/^\d{7,8}[\dK]$/.test(s)) return false;
+  const cuerpo = s.slice(0, -1), dv = s.slice(-1);
+  let suma = 0, m = 2;
+  for (let i = cuerpo.length - 1; i >= 0; i--) { suma += Number(cuerpo[i]) * m; m = m === 7 ? 2 : m + 1; }
+  const e = 11 - (suma % 11);
+  return dv === (e === 11 ? "0" : e === 10 ? "K" : String(e));
+}
+
 /** Normaliza un RUT a 12345678-9: sin puntos, sin espacios, con K mayúscula. */
 export function rutPlano(r: string): string {
   return r.replace(/[^0-9kK]/g, "").replace(/k/g, "K").replace(/^(\d+)([\dK])$/, "$1-$2");

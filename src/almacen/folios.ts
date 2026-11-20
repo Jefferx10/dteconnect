@@ -2,6 +2,9 @@ import { PoolClient } from "pg";
 import { consulta, enTransaccion } from "./db";
 import { descifrar } from "./cifrado";
 import { Caf, leerCaf } from "../sii/caf";
+import { ErrorDatos, SinFolios } from "./errores";
+
+export { SinFolios };
 
 /*
  * Foliación controlada.
@@ -18,13 +21,6 @@ import { Caf, leerCaf } from "../sii/caf";
  */
 
 export type EstadoFolio = "asignado" | "emitido" | "anulado";
-
-export class SinFolios extends Error {
-  constructor(public tipo: number) {
-    super(`No quedan folios para documentos tipo ${tipo}. Carga un CAF nuevo antes de seguir emitiendo.`);
-    this.name = "SinFolios";
-  }
-}
 
 /**
  * Entrega el siguiente folio disponible.
@@ -79,7 +75,7 @@ export async function cafDeFolio(emisorRut: string, tipo: number, folio: number)
       where f.emisor_rut = $1 and f.tipo = $2 and f.folio = $3`,
     [emisorRut, tipo, folio],
   );
-  if (!r.length) throw new Error(`El folio ${folio} no está asignado para este emisor.`);
+  if (!r.length) throw new ErrorDatos(`El folio ${folio} no está asignado para este emisor.`);
   return leerCaf(descifrar(r[0].xml).toString("utf8"));
 }
 
@@ -131,7 +127,7 @@ export async function guardarCaf(
         [emisorRut, caf.tipo, caf.desde, caf.hasta],
       );
       const choca = previos.map((p) => `${p.desde}–${p.hasta}`).join(", ");
-      throw new Error(
+      throw new ErrorDatos(
         `Ese CAF (${caf.desde}–${caf.hasta}) se pisa con un rango ya cargado${choca ? ` (${choca})` : ""}. ` +
         "Pide folios nuevos al SII para este sistema: dos rangos solapados terminan en folios repetidos.",
       );
