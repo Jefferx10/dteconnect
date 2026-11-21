@@ -8,15 +8,42 @@ proceso antes de emitir en producción. Hasta entonces, todo va contra `maullin`
 
 ## Puesta en marcha
 
+Antes de nada, el dominio tiene que apuntar a la IP del servidor: Caddy saca el
+certificado TLS solo, y si el nombre no resuelve, no lo emite.
+
 ```bash
-cp .env.ejemplo .env
-openssl rand -base64 48        # pegar el resultado en DTE_LLAVE_MAESTRA
+cp ejemplo.env.txt .env
+
+openssl rand -base64 48        # → DTE_LLAVE_MAESTRA
+openssl rand -base64 36        # → DTE_LLAVE_ADMIN
+openssl rand -hex 24           # → POSTGRES_PASSWORD, y la misma en DATABASE_URL
+
+# completar también DOMINIO y CORREO_TLS
 docker compose up -d --build
+curl https://TU_DOMINIO/salud
 ```
+
+Solo el proxy abre puertos al mundo. La API y la base no se publican: se alcanzan
+por la red interna del compose.
 
 **Respalda la llave maestra fuera del servidor.** Con ella se cifran los
 certificados y los CAF guardados; si se pierde, no hay forma de recuperarlos y hay
-que volver a cargarlos todos.
+que volver a cargarlos todos. Guárdala en otro lugar que los respaldos de la base:
+juntos vuelven a ser una sola cosa que robar.
+
+Después, `despliegue/respaldo.sh` en el cron. Lo que respalda no es solo historia:
+son los contadores de folios.
+
+## Las tres llaves
+
+| | Para qué | Quién la tiene |
+|---|---|---|
+| `DTE_LLAVE_MAESTRA` | Cifra certificados y CAF en la base | Solo el servidor, y un respaldo aparte |
+| `DTE_LLAVE_ADMIN` | Dar de alta emisores, cargar certificados y CAF | Solo tú |
+| Llave de aplicación | Emitir y consultar | Patiolo y cada programa, una distinta |
+
+La llave de una aplicación se muestra **una sola vez**, al crearla. No se guarda en
+claro: en la base queda solo su hash.
 
 ## Qué hay adentro
 
@@ -38,8 +65,10 @@ src/almacen/
 1. **Se firman exactamente los bytes que se envían.** El `<DD>` del timbre y el
    bloque `<CAF>` se arman una vez como texto y se incrustan tal cual. Pasarlos por
    un DOM cambia algún byte y la firma deja de validar.
-2. **Un folio entregado no vuelve al rango.** Si el documento falla, el folio queda
-   anulado y hay que informarlo. Reutilizarlo es peor.
+2. **Un folio entregado no vuelve al rango.** Si el envío al SII falla, el folio
+   queda **asignado** —no anulado— con el DTE ya firmado guardado, para reenviarlo.
+   Anularlo dejaría un hueco en la numeración que el SII después pregunta, y
+   reutilizarlo es peor todavía.
 
 ## Ambientes
 

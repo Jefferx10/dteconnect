@@ -1,9 +1,24 @@
 services:
+  # Caddy publica el servicio con TLS y saca el certificado solo. Es el único
+  # contenedor con puertos abiertos al mundo: la API y la base solo se ven desde
+  # adentro de la red del compose.
+  proxy:
+    image: caddy:2.10-alpine
+    restart: unless-stopped
+    ports: ["80:80", "443:443"]
+    env_file: .env
+    volumes:
+      - ./despliegue/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_datos:/data
+      - caddy_config:/config
+    depends_on: [api]
+
   api:
     build: .
     restart: unless-stopped
     env_file: .env
-    ports: ["127.0.0.1:3000:3000"]   # solo local: nginx lo publica con TLS
+    # Sin "ports": no se publica. Caddy la alcanza por la red interna.
+    expose: ["3000"]
     depends_on:
       db: { condition: service_healthy }
 
@@ -12,7 +27,7 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: dte
-      POSTGRES_PASSWORD: dte
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?falta POSTGRES_PASSWORD en .env}
       POSTGRES_DB: dte
     volumes:
       - datos:/var/lib/postgresql/data
@@ -24,3 +39,5 @@ services:
 
 volumes:
   datos:
+  caddy_datos:
+  caddy_config:

@@ -1,0 +1,32 @@
+# Caddy saca y renueva el certificado TLS solo, contra Let's Encrypt. Para eso el
+# dominio tiene que apuntar a la IP de este servidor antes de levantar el compose:
+# si no resuelve, el certificado no se emite y el servicio queda sin publicar.
+
+{
+	email {$CORREO_TLS}
+}
+
+{$DOMINIO} {
+	# Por acá pasan certificados digitales y llaves de API. Que nada de eso viaje
+	# en claro ni quede en un registro.
+	encode gzip
+
+	log {
+		output stdout
+		format console
+		# El cuerpo no se registra nunca: lleva el .pfx y la clave del certificado.
+	}
+
+	# El cuerpo de una carga de certificado o CAF puede pasar del límite por omisión.
+	request_body {
+		max_size 20MB
+	}
+
+	reverse_proxy api:3000 {
+		# Emitir un documento incluye ir al SII y volver; el valor por omisión corta antes.
+		transport http {
+			read_timeout 120s
+			write_timeout 120s
+		}
+	}
+}
