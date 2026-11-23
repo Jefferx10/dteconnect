@@ -30,7 +30,15 @@ export interface Contexto {
 }
 
 type Manejador = (c: Contexto) => Promise<unknown>;
-type Guardia = "publica" | "app" | "admin";
+/**
+ * Quién puede entrar por cada ruta.
+ *
+ *  publica  nadie necesita llave (solo /salud)
+ *  app      llave de una aplicación: emitir y consultar lo emitido
+ *  lectura  llave de aplicación o de administración: consultar emisores
+ *  admin    solo la llave de administración: cargar certificados, CAF y llaves
+ */
+type Guardia = "publica" | "app" | "lectura" | "admin";
 
 interface Ruta { metodo: string; partes: string[]; guardia: Guardia; manejador: Manejador }
 
@@ -99,13 +107,28 @@ export async function atender(req: IncomingMessage, res: ServerResponse): Promis
     if (r.guardia === "admin" && !esAdmin(llaveDe(req))) {
       throw noAutorizado("Esta operación requiere la llave de administración.");
     }
-    if (r.guardia === "app") {
+    if (r.guardia === "app" || r.guardia === "lectura") {
+      /*
+       * "lectura" son las consultas de emisores que sirven tanto a un programa que va
+       * a emitir como a la pantalla de administración. Esa pantalla tiene que poder
+       * listar emisores antes de que exista ninguna aplicación, porque las
+       * aplicaciones se crean ahí mismo; con solo la llave de aplicación se armaba un
+       * círculo del que no se salía.
+       *
+       * Aceptar la llave de administración acá no concede nada nuevo: con ella ya se
+       * pueden crear aplicaciones, así que quien la tenga obtiene una llave de
+       * aplicación cuando quiera. Negarla sería apariencia de control, no control.
+       */
       const app = await appDeLlave(llaveDe(req));
-      if (!app) throw noAutorizado();
-      c.app = app;
-      // Una aplicación limitada no opera con emisores que no son suyos.
-      if (params.rut && !appPuedeCon(app, params.rut)) {
-        throw prohibido(`La aplicación ${app.nombre} no tiene permitido operar con ese emisor.`);
+      if (!app) {
+        if (r.guardia !== "lectura" || !esAdmin(llaveDe(req))) throw noAutorizado();
+        // Administración: no hay aplicación, y las rutas de lectura no la necesitan.
+      } else {
+        c.app = app;
+        // Una aplicación limitada no opera con emisores que no son suyos.
+        if (params.rut && !appPuedeCon(app, params.rut)) {
+          throw prohibido(`La aplicación ${app.nombre} no tiene permitido operar con ese emisor.`);
+        }
       }
     }
 

@@ -47,15 +47,15 @@ ruta("GET", "/salud", "publica", async () => {
 
 // --------------------------------------------------------------- emisores
 
-ruta("GET", "/emisores", "app", async () => ({ emisores: await listarEmisores() }));
+ruta("GET", "/emisores", "lectura", async () => ({ emisores: await listarEmisores() }));
 
-ruta("GET", "/emisores/:rut", "app", async ({ params }) => {
+ruta("GET", "/emisores/:rut", "lectura", async ({ params }) => {
   const e = await verEmisor(params.rut);
   if (!e) throw noEncontrado(`No hay un emisor con RUT ${params.rut}.`);
   return e;
 });
 
-ruta("GET", "/emisores/:rut/folios", "app", async ({ params }) => {
+ruta("GET", "/emisores/:rut/folios", "lectura", async ({ params }) => {
   const e = await verEmisor(params.rut);
   if (!e) throw noEncontrado(`No hay un emisor con RUT ${params.rut}.`);
   return { rut: e.rut, folios: await foliosDisponibles(e.rut) };
